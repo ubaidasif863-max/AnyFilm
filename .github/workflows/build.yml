@@ -27,15 +27,71 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # SCREENSHOT 2 WALA ASLI WORKING PLAYER RESTORE KAREIN
-      - name: Restore Screenshot 2 Player & UI
+      # 1. Official Screenshot 2 Clean Player Fetch Karein
+      - name: Restore Official DetailScreen
         run: |
           git remote add upstream https://github.com/solo12345689/AnyFilm.git || true
           git fetch upstream
           git checkout upstream/main -- app/src/main/java/com/example/ui/screens/DetailScreen.kt || \
           git checkout upstream/master -- app/src/main/java/com/example/ui/screens/DetailScreen.kt
 
-      # Google Services Dummy Generator
+      # 2. Player ke upar Volume aur Brightness Gestures Inject Karein
+      - name: Add Volume & Brightness Drag Gestures
+        run: |
+          python3 -c '
+          path = "app/src/main/java/com/example/ui/screens/DetailScreen.kt"
+          with open(path, "r") as f:
+              code = f.read()
+
+          # Zaroori imports package ke theek BAAD add karna
+          pkg_target = "package com.example.ui.screens"
+          imports_to_add = """
+          import androidx.compose.foundation.gestures.detectVerticalDragGestures
+          import androidx.compose.ui.input.pointer.pointerInput
+          import android.media.AudioManager
+          import android.app.Activity
+          import android.content.Context
+          """
+          if pkg_target in code:
+              code = code.replace(pkg_target, pkg_target + "\n" + imports_to_add, 1)
+
+          # PlayerView ke upar Volume aur Brightness ka Gesture Listener lagana
+          # Jab PlayerView call hota hai, uske modifier me gestures enable karna
+          gesture_logic = """
+                      .pointerInput(Unit) {
+                          detectVerticalDragGestures { change, dragAmount ->
+                              val isLeft = change.position.x < (size.width / 2)
+                              if (isLeft) {
+                                  val act = context as? Activity
+                                  act?.let {
+                                      val lp = it.window.attributes
+                                      val current = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+                                      lp.screenBrightness = (current - dragAmount * 0.005f).coerceIn(0.01f, 1.0f)
+                                      it.window.attributes = lp
+                                  }
+                              } else {
+                                  val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                                  val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                                  val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                  val step = if (dragAmount < 0) 1 else -1
+                                  am.setStreamVolume(AudioManager.STREAM_MUSIC, (curVol + step).coerceIn(0, maxVol), 0)
+                              }
+                          }
+                      }
+          """
+          
+          # AndroidView ya PlayerView modifier ke sath jorna
+          if "PlayerView(ctx)" in code:
+              code = code.replace("PlayerView(ctx)", "PlayerView(ctx)" + "\n" + gesture_logic, 1)
+          elif "PlayerView(context)" in code:
+              code = code.replace("PlayerView(context)", "PlayerView(context)" + "\n" + gesture_logic, 1)
+
+          with open(path, "w") as f:
+              f.write(code)
+          print("Gestures successfully attached to Screenshot 2 player!")
+          '
+
+      # 3. Google Services Missing Fix
       - name: Generate Dummy google-services.json
         run: |
           mkdir -p app
@@ -86,14 +142,14 @@ jobs:
           }
           EOF
 
-      # Memory & Headless
+      # 4. JVM & Headless
       - name: Setup JVM & Gradle Properties
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx4096m -Djava.awt.headless=true" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Djava.awt.headless=true" >> ~/.gradle/gradle.properties
 
-      # Build APK
+      # 5. Build APK
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
