@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Java JDK 17
         uses: actions/setup-java@v4
@@ -25,20 +27,15 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # 1. Clean DetailScreen Restore
-      - name: Restore Working DetailScreen
+      # SCREENSHOT 2 WALA ASLI WORKING PLAYER RESTORE KAREIN
+      - name: Restore Screenshot 2 Player & UI
         run: |
-          git checkout HEAD -- app/src/main/java/com/example/ui/screens/DetailScreen.kt || true
+          git remote add upstream https://github.com/solo12345689/AnyFilm.git || true
+          git fetch upstream
+          git checkout upstream/main -- app/src/main/java/com/example/ui/screens/DetailScreen.kt || \
+          git checkout upstream/master -- app/src/main/java/com/example/ui/screens/DetailScreen.kt
 
-      # 2. Find Exact Player Location in Project
-      - name: Locate Player File
-        run: |
-          echo "=== SEARCHING FOR PLAYERVIEW IN APP ==="
-          grep -rn "PlayerView" app/src/main/java/ || true
-          echo "=== SEARCHING FOR EXOPLAYER IN APP ==="
-          grep -rn "ExoPlayer" app/src/main/java/ || true
-
-      # 3. Google Services Missing Fix
+      # Google Services Dummy Generator
       - name: Generate Dummy google-services.json
         run: |
           mkdir -p app
@@ -89,14 +86,14 @@ jobs:
           }
           EOF
 
-      # 4. JVM & Headless
+      # Memory & Headless
       - name: Setup JVM & Gradle Properties
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx4096m -Djava.awt.headless=true" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Djava.awt.headless=true" >> ~/.gradle/gradle.properties
 
-      # 5. Build APK
+      # Build APK
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
