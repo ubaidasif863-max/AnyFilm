@@ -1,492 +1,280 @@
-package com.example.ui.screens
+package com.example.ui.screen.player
 
-import androidx.activity.compose.BackHandler
+import android.app.Activity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.annotation.OptIn
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.ui.composed
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.foundation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
-import com.example.data.local.FavoriteEntity
-import com.example.data.local.HistoryEntity
-import com.example.data.model.Episode
-import com.example.data.model.MovieSubject
-import com.example.data.model.StreamItem
-import com.example.data.model.SubtitleItem
-import com.example.ui.theme.*
-import com.example.ui.viewmodel.MovieViewModel
-import com.example.ui.viewmodel.ActiveDownload
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
-import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import android.net.Uri
-import android.content.Intent
-import com.example.R
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.draw.rotate
+import com.example.data.model.MovieSubject
+import com.example.ui.viewmodel.PlayerViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(UnstableApi::class)
 @Composable
-fun DetailScreen(viewModel: MovieViewModel) {
-    val subject = viewModel.selectedSubject ?: return
-    val isFav by viewModel.isFavoriteFlow(subject.id).collectAsState(false)
+fun PlayerScreen(
+    viewModel: PlayerViewModel,
+    subject: MovieSubject,
+    onBackPress: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val scope = rememberCoroutineScope()
 
-    BackHandler {
-        viewModel.selectedSubject = null
+    // ExoPlayer Instance
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            playWhenReady = true
+        }
     }
+
+    // Selected Stream update hone par video load karna
+    LaunchedEffect(viewModel.selectedStream) {
+        viewModel.selectedStream?.url?.let { streamUrl ->
+            exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
+            exoPlayer.prepare()
+            exoPlayer.play()
+        }
+    }
+
+    // Clean up
+    DisposableEffect(Unit) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    // Dialogs state
+    var showQualityMenu by remember { mutableStateOf(false) }
+    var showSubtitleMenu by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(ObsidianDark)
+            .background(Color.Black)
+            // ================= 1. GESTURE LISTENER (LEFT/RIGHT DRAG) =================
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragEnd = {
+                        scope.launch {
+                            delay(1200)
+                            viewModel.hideBrightnessHud()
+                            viewModel.hideVolumeHud()
+                        }
+                    }
+                ) { change, dragAmount ->
+                    val isLeftSide = change.position.x < (size.width / 2)
+                    if (isLeftSide) {
+                        // LEFT SIDE: Brightness
+                        viewModel.adjustBrightness(dragAmount)
+                        activity?.window?.let { window ->
+                            val lp = window.attributes
+                            lp.screenBrightness = viewModel.brightness
+                            window.attributes = lp
+                        }
+                    } else {
+                        // RIGHT SIDE: Volume
+                        viewModel.adjustVolume(dragAmount)
+                    }
+                }
+            }
     ) {
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            // Backdrop and poster cover
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(300.dp)
+        // Video View
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = true
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // ================= 2. TOP ACTION BAR (QUALITY, AUDIO, DOWNLOAD) =================
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 20.dp, start = 14.dp, end = 14.dp)
+                .align(Alignment.TopCenter),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Back Button
+            IconButton(
+                onClick = onBackPress,
+                modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+
+            // Title
+            Text(
+                text = subject.name,
+                color = Color.White,
+                fontSize = 15.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+            )
+
+            // Right Action Buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Quality Button
+                IconButton(
+                    onClick = { showQualityMenu = true },
+                    modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
-                    val optimalBackdropUrl = androidx.compose.runtime.remember(subject.backdrop, subject.poster) {
-                        val sourceUrl = subject.backdrop?.ifBlank { null } ?: subject.poster
-                        com.example.util.ImageOptimizer.getOptimalUrl(sourceUrl, 1080)
-                    }
-                    val ambientColor = androidx.compose.runtime.remember(subject.averageHue) {
-                        com.example.util.ImageOptimizer.parseAverageHue(subject.averageHue)
-                    }
-                    val placeholderPainter = androidx.compose.runtime.remember(subject.blurHash, ambientColor) {
-                        com.example.util.ImageOptimizer.getBlurHashPainter(subject.blurHash, 30, 20)
-                            ?: androidx.compose.ui.graphics.painter.ColorPainter(ambientColor)
-                    }
-
-                    AsyncImage(
-                        model = coil.request.ImageRequest.Builder(LocalContext.current)
-                            .data(optimalBackdropUrl)
-                            .memoryCacheKey(optimalBackdropUrl)
-                            .diskCacheKey(optimalBackdropUrl)
-                            .precision(coil.size.Precision.EXACT)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = subject.name,
-                        contentScale = ContentScale.Crop,
-                        placeholder = placeholderPainter,
-                        error = placeholderPainter,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    // Backdrop gradient
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Black.copy(alpha = 0.5f),
-                                        ObsidianDark
-                                    )
-                                )
-                            )
-                    )
-
-                    // Close Button
-                    IconButton(
-                        onClick = { viewModel.selectedSubject = null },
-                        modifier = Modifier
-                            .statusBarsPadding()
-                            .padding(top = 16.dp, start = 16.dp)
-                            .align(Alignment.TopStart)
-                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
-                            .testTag("detail_close_button")
-                    ) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                    }
+                    Icon(Icons.Default.Settings, contentDescription = "Quality", tint = Color.White)
                 }
-            }
 
-            // Title block
-            item {
-                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = subject.name,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = { viewModel.toggleFavorite(subject) }) {
-                            Icon(
-                                imageVector = if (isFav) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                contentDescription = "Favorite",
-                                tint = if (isFav) CinematicRed else TextPrimary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        if (!subject.rating.isNullOrBlank() && subject.rating != "Not available" && subject.rating != "0" && subject.rating != "0.0") {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Filled.Star, contentDescription = "Rating", tint = AccentAmber, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(subject.rating, color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                        }
-                        if (!subject.year.isNullOrBlank() && subject.year != "Not available") {
-                            Text(subject.year, color = TextSecondary, fontSize = 14.sp)
-                        }
-                        if (!subject.duration.isNullOrBlank() && subject.duration != "Not available") {
-                            Text(subject.duration, color = TextSecondary, fontSize = 14.sp)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Genres row
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        subject.genres.forEach { gen ->
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = ObsidianCard),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = gen,
-                                    fontSize = 11.sp,
-                                    color = TextSecondary,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Audio Language / Dubs row
-                    val audioDisplay = when {
-                        subject.dubs.isNotEmpty() -> subject.dubs.joinToString(", ")
-                        subject.resourceDetectors.isNotEmpty() -> subject.resourceDetectors.joinToString(", ") { it.name }
-                        else -> "Not available"
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 8.dp)
-                    ) {
-                        Icon(Icons.Filled.VolumeUp, contentDescription = "Audio Language", tint = TextSecondary, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Audio: $audioDisplay",
-                            fontSize = 12.sp,
-                            color = TextSecondary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Description text
-                    Text(
-                        text = subject.description.ifEmpty { "No description available for this item." },
-                        fontSize = 14.sp,
-                        color = TextSecondary,
-                        lineHeight = 20.sp
-                    )
-
-                    // Live Cast Section
-                    if (subject.cast.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Cast",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        ) {
-                            items(subject.cast) { actor ->
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    modifier = Modifier.width(80.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(60.dp)
-                                            .clip(androidx.compose.foundation.shape.CircleShape)
-                                            .background(ObsidianCard)
-                                    ) {
-                                        if (actor.avatar.isNotEmpty()) {
-                                            coil.compose.AsyncImage(
-                                                model = actor.avatar,
-                                                contentDescription = actor.name,
-                                                contentScale = ContentScale.Crop, placeholder = androidx.compose.ui.graphics.painter.ColorPainter(androidx.compose.ui.graphics.Color.DarkGray), error = androidx.compose.ui.graphics.painter.ColorPainter(androidx.compose.ui.graphics.Color.DarkGray),
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier.fillMaxSize(),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Person,
-                                                    contentDescription = "Avatar placeholder",
-                                                    tint = TextSecondary,
-                                                    modifier = Modifier.size(28.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = actor.name,
-                                        fontSize = 11.sp,
-                                        color = TextPrimary,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Text(
-                                        text = actor.role.ifEmpty { "Cast" },
-                                        fontSize = 9.sp,
-                                        color = TextSecondary,
-                                        maxLines = 1,
-                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // More Like This Section
-                    if (viewModel.detailRecommendations.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "More Like This",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        ) {
-                            items(viewModel.detailRecommendations) { movie ->
-                                MovieGridItem(movie) {
-                                    viewModel.selectSubject(movie)
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    // Action buttons
-                    if (!subject.isTvShow) {
-                        Button(
-                            onClick = { viewModel.selectMovieDirect() },
-                            colors = ButtonDefaults.buttonColors(containerColor = CinematicRed),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .testTag("play_movie_button"),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Icon(Icons.Filled.PlayArrow, contentDescription = "Play")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Stream Movie in High Definition", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        }
-                    } else if (!viewModel.isAniFam) {
-                        Text(
-                            text = "Seasons",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        // Season Selector Horizontal chips
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(bottom = 20.dp)
-                        ) {
-                            items(viewModel.seasonsList) { s ->
-                                FilterChip(
-                                    selected = viewModel.selectedSeason == s,
-                                    onClick = { viewModel.loadEpisodesForSeason(s) },
-                                    label = { Text("Season $s") },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = CinematicRed,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = ObsidianCard,
-                                        labelColor = TextSecondary
-                                    ),
-                                    border = null
-                                )
-                            }
-                        }
-                    }
+                // Audio / Subtitle Button
+                IconButton(
+                    onClick = { showSubtitleMenu = true },
+                    modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
+                ) {
+                    Icon(Icons.Default.Language, contentDescription = "Audio/Subtitles", tint = Color.White)
                 }
-            }
 
-            // TV Show Episodes List Section
-            if (subject.isTvShow) {
-                if (viewModel.isLoadingEpisodes) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    color = CinematicRed,
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Text(
-                                    text = "Loading episodes...",
-                                    color = TextSecondary,
-                                    fontSize = 13.sp
-                                )
-                            }
-                        }
-                    }
-                } else if (viewModel.episodesList.isEmpty()) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "No episodes available for this season",
-                                color = TextSecondary,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                } else {
-                    items(viewModel.episodesList) { ep ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 6.dp)
-                                .clickable { viewModel.selectEpisode(ep) }
-                                .background(ObsidianCard, RoundedCornerShape(8.dp))
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AsyncImage(
-                                model = ep.stillPath.ifEmpty { subject.poster },
-                                contentDescription = ep.title,
-                                contentScale = ContentScale.Crop, placeholder = androidx.compose.ui.graphics.painter.ColorPainter(androidx.compose.ui.graphics.Color.DarkGray), error = androidx.compose.ui.graphics.painter.ColorPainter(androidx.compose.ui.graphics.Color.DarkGray),
-                                modifier = Modifier
-                                    .size(width = 80.dp, height = 50.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Episode ${ep.episodeNumber}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = AccentAmber
-                                )
-                                Text(
-                                    text = ep.title,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            val context = LocalContext.current
-                            IconButton(
-                                onClick = { viewModel.downloadSingleEpisode(context, subject, ep) },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    Icons.Filled.Download,
-                                    contentDescription = "Download Episode",
-                                    tint = Color.White.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Icon(Icons.Filled.PlayCircleFilled, contentDescription = "Play", tint = CinematicRed, modifier = Modifier.size(32.dp))
-                        }
-                    }
+                // Download Button
+                IconButton(
+                    onClick = { viewModel.downloadCurrentMedia(subject, viewModel.currentEpisode) },
+                    modifier = Modifier.background(Color(0x666C5CE7), RoundedCornerShape(50))
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = "Download", tint = Color.White)
                 }
-            }
-
-            // Bottom space
-            item {
-                Spacer(modifier = Modifier.height(40.dp))
             }
         }
+
+        // ================= 3. HUD INDICATORS (VOLUME & BRIGHTNESS) =================
+        // Brightness HUD (Left)
+        if (viewModel.showBrightnessHud) {
+            HudDisplay(
+                icon = Icons.Default.BrightnessMedium,
+                value = (viewModel.brightness * 100).toInt(),
+                modifier = Modifier.align(Alignment.CenterStart).padding(start = 30.dp)
+            )
+        }
+
+        // Volume HUD (Right)
+        if (viewModel.showVolumeHud) {
+            HudDisplay(
+                icon = Icons.Default.VolumeUp,
+                value = (viewModel.volume * 100).toInt(),
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 30.dp)
+            )
+        }
+
+        // ================= 4. QUALITY SELECTION DIALOG =================
+        if (showQualityMenu) {
+            AlertDialog(
+                onDismissRequest = { showQualityMenu = false },
+                title = { Text("Quality Select Karein", color = Color.White) },
+                text = {
+                    Column {
+                        val streams = viewModel.playInfo?.streams ?: emptyList()
+                        if (streams.isEmpty()) {
+                            Text("Default Auto Stream Active", color = Color.Gray)
+                        } else {
+                            streams.forEach { stream ->
+                                TextButton(
+                                    onClick = {
+                                        viewModel.selectQuality(stream)
+                                        showQualityMenu = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = stream.resolution ?: stream.format ?: "Stream Quality",
+                                        color = if (viewModel.selectedStream == stream) Color(0xFF6C5CE7) else Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showQualityMenu = false }) { Text("Close") }
+                },
+                containerColor = Color(0xFF161822)
+            )
+        }
+
+        // ================= 5. AUDIO / SUBTITLE DIALOG =================
+        if (showSubtitleMenu) {
+            AlertDialog(
+                onDismissRequest = { showSubtitleMenu = false },
+                title = { Text("Audio / Subtitle Select Karein", color = Color.White) },
+                text = {
+                    Column {
+                        val subtitles = viewModel.playInfo?.subtitles ?: emptyList()
+                        if (subtitles.isEmpty()) {
+                            Text("Koi extra language track nahi mila.", color = Color.Gray)
+                        } else {
+                            subtitles.forEach { sub ->
+                                TextButton(
+                                    onClick = {
+                                        viewModel.selectSubtitleTrack(sub)
+                                        showSubtitleMenu = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = sub.language ?: "Audio Track",
+                                        color = if (viewModel.selectedSubtitle == sub) Color(0xFF6C5CE7) else Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showSubtitleMenu = false }) { Text("Close") }
+                },
+                containerColor = Color(0xFF161822)
+            )
+        }
+    }
+}
+
+@Composable
+fun HudDisplay(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    value: Int,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .background(Color(0xCC101117), RoundedCornerShape(12.dp))
+            .padding(vertical = 16.dp, horizontal = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("$value%", color = Color.White, fontSize = 13.sp)
     }
 }
