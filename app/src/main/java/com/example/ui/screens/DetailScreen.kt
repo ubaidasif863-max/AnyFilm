@@ -37,7 +37,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DetailScreen(
     subject: MovieSubject,
-    onBackPress: () -> Unit,
+    onBackPress: () -> Unit = {}, // <-- YAHAN DEFAULT VALUE LAGA DI GAYI HAI
     viewModel: PlayerViewModel = viewModel()
 ) {
     val context = LocalContext.current
