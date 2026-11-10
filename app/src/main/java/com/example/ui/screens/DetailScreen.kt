@@ -1,4 +1,4 @@
-package com.example.ui.screen.player
+package com.example.ui.screens
 
 import android.app.Activity
 import android.view.ViewGroup
@@ -21,34 +21,37 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.example.data.model.MovieSubject
+import com.example.data.model.StreamItem
+import com.example.data.model.SubtitleItem
 import com.example.ui.viewmodel.PlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerScreen(
-    viewModel: PlayerViewModel,
+fun DetailScreen(
     subject: MovieSubject,
-    onBackPress: () -> Unit
+    onBackPress: () -> Unit,
+    viewModel: PlayerViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
-    // ExoPlayer Instance
+    // ExoPlayer setup
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
         }
     }
 
-    // Selected Stream update hone par video load karna
+    // Video stream change listener
     LaunchedEffect(viewModel.selectedStream) {
         viewModel.selectedStream?.url?.let { streamUrl ->
             exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
@@ -64,7 +67,6 @@ fun PlayerScreen(
         }
     }
 
-    // Dialogs state
     var showQualityMenu by remember { mutableStateOf(false) }
     var showSubtitleMenu by remember { mutableStateOf(false) }
 
@@ -72,7 +74,7 @@ fun PlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // ================= 1. GESTURE LISTENER (LEFT/RIGHT DRAG) =================
+            // ================= 1. GESTURE ENGINE (DRAG LEFT/RIGHT) =================
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragEnd = {
@@ -85,7 +87,6 @@ fun PlayerScreen(
                 ) { change, dragAmount ->
                     val isLeftSide = change.position.x < (size.width / 2)
                     if (isLeftSide) {
-                        // LEFT SIDE: Brightness
                         viewModel.adjustBrightness(dragAmount)
                         activity?.window?.let { window ->
                             val lp = window.attributes
@@ -93,7 +94,6 @@ fun PlayerScreen(
                             window.attributes = lp
                         }
                     } else {
-                        // RIGHT SIDE: Volume
                         viewModel.adjustVolume(dragAmount)
                     }
                 }
@@ -114,16 +114,15 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // ================= 2. TOP ACTION BAR (QUALITY, AUDIO, DOWNLOAD) =================
+        // ================= 2. TOP ACTION BAR =================
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 20.dp, start = 14.dp, end = 14.dp)
+                .padding(top = 24.dp, start = 14.dp, end = 14.dp)
                 .align(Alignment.TopCenter),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Back Button
             IconButton(
                 onClick = onBackPress,
                 modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
@@ -131,7 +130,6 @@ fun PlayerScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
 
-            // Title
             Text(
                 text = subject.name,
                 color = Color.White,
@@ -142,7 +140,6 @@ fun PlayerScreen(
                     .padding(horizontal = 10.dp)
             )
 
-            // Right Action Buttons
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // Quality Button
                 IconButton(
@@ -152,12 +149,12 @@ fun PlayerScreen(
                     Icon(Icons.Default.Settings, contentDescription = "Quality", tint = Color.White)
                 }
 
-                // Audio / Subtitle Button
+                // Subtitle/Language Button
                 IconButton(
                     onClick = { showSubtitleMenu = true },
                     modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.Default.Language, contentDescription = "Audio/Subtitles", tint = Color.White)
+                    Icon(Icons.Default.Language, contentDescription = "Language", tint = Color.White)
                 }
 
                 // Download Button
@@ -170,8 +167,7 @@ fun PlayerScreen(
             }
         }
 
-        // ================= 3. HUD INDICATORS (VOLUME & BRIGHTNESS) =================
-        // Brightness HUD (Left)
+        // ================= 3. HUD INDICATORS =================
         if (viewModel.showBrightnessHud) {
             HudDisplay(
                 icon = Icons.Default.BrightnessMedium,
@@ -180,7 +176,6 @@ fun PlayerScreen(
             )
         }
 
-        // Volume HUD (Right)
         if (viewModel.showVolumeHud) {
             HudDisplay(
                 icon = Icons.Default.VolumeUp,
@@ -189,18 +184,18 @@ fun PlayerScreen(
             )
         }
 
-        // ================= 4. QUALITY SELECTION DIALOG =================
+        // ================= 4. QUALITY DIALOG =================
         if (showQualityMenu) {
+            val streamList: List<StreamItem> = viewModel.playInfo?.streams ?: emptyList()
             AlertDialog(
                 onDismissRequest = { showQualityMenu = false },
                 title = { Text("Quality Select Karein", color = Color.White) },
                 text = {
                     Column {
-                        val streams = viewModel.playInfo?.streams ?: emptyList()
-                        if (streams.isEmpty()) {
-                            Text("Default Auto Stream Active", color = Color.Gray)
+                        if (streamList.isEmpty()) {
+                            Text("Auto / Default Stream", color = Color.Gray)
                         } else {
-                            streams.forEach { stream ->
+                            for (stream in streamList) {
                                 TextButton(
                                     onClick = {
                                         viewModel.selectQuality(stream)
@@ -209,7 +204,7 @@ fun PlayerScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = stream.resolution ?: stream.format ?: "Stream Quality",
+                                        text = stream.resolution ?: stream.format ?: "Quality",
                                         color = if (viewModel.selectedStream == stream) Color(0xFF6C5CE7) else Color.White
                                     )
                                 }
@@ -224,18 +219,18 @@ fun PlayerScreen(
             )
         }
 
-        // ================= 5. AUDIO / SUBTITLE DIALOG =================
+        // ================= 5. SUBTITLE / AUDIO DIALOG =================
         if (showSubtitleMenu) {
+            val subtitleList: List<SubtitleItem> = viewModel.playInfo?.subtitles ?: emptyList()
             AlertDialog(
                 onDismissRequest = { showSubtitleMenu = false },
                 title = { Text("Audio / Subtitle Select Karein", color = Color.White) },
                 text = {
                     Column {
-                        val subtitles = viewModel.playInfo?.subtitles ?: emptyList()
-                        if (subtitles.isEmpty()) {
-                            Text("Koi extra language track nahi mila.", color = Color.Gray)
+                        if (subtitleList.isEmpty()) {
+                            Text("No extra tracks available", color = Color.Gray)
                         } else {
-                            subtitles.forEach { sub ->
+                            for (sub in subtitleList) {
                                 TextButton(
                                     onClick = {
                                         viewModel.selectSubtitleTrack(sub)
@@ -244,7 +239,7 @@ fun PlayerScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = sub.language ?: "Audio Track",
+                                        text = sub.toString(),
                                         color = if (viewModel.selectedSubtitle == sub) Color(0xFF6C5CE7) else Color.White
                                     )
                                 }
