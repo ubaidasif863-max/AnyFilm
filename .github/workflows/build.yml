@@ -25,7 +25,7 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # Google Services JSON Missing Error Fix
+      # Google Services Dummy Generator
       - name: Generate Dummy google-services.json
         run: |
           mkdir -p app
@@ -76,16 +76,16 @@ jobs:
           }
           EOF
 
-      # KSP Headless & Memory Bug Fix
-      - name: Fix KSP Environment
+      # Memory & Headless settings
+      - name: Setup JVM & Gradle Properties
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx4096m -Djava.awt.headless=true" >> ~/.gradle/gradle.properties
-          echo "ksp.useKSP2=false" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Djava.awt.headless=true" >> ~/.gradle/gradle.properties
 
+      # Build Command
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace -Djava.awt.headless=true
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
