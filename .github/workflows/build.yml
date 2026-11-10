@@ -25,7 +25,13 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # Google Services Dummy Generator
+      # 1. AUTO-RESTORE ORIGINAL DETAILSCREEN (Phone hang hone se bachane ke liye)
+      - name: Restore Original Clean DetailScreen
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/solo12345689/AnyFilm/main/app/src/main/java/com/example/ui/screens/DetailScreen.kt" -o app/src/main/java/com/example/ui/screens/DetailScreen.kt || \
+          curl -sSL "https://raw.githubusercontent.com/solo12345689/AnyFilm/master/app/src/main/java/com/example/ui/screens/DetailScreen.kt" -o app/src/main/java/com/example/ui/screens/DetailScreen.kt
+
+      # 2. Google Services Fix
       - name: Generate Dummy google-services.json
         run: |
           mkdir -p app
@@ -76,14 +82,14 @@ jobs:
           }
           EOF
 
-      # Memory & Headless settings
+      # 3. JVM Settings
       - name: Setup JVM & Gradle Properties
         run: |
           mkdir -p ~/.gradle
           echo "org.gradle.jvmargs=-Xmx4096m -Djava.awt.headless=true" >> ~/.gradle/gradle.properties
           echo "kotlin.daemon.jvm.options=-Djava.awt.headless=true" >> ~/.gradle/gradle.properties
 
-      # Build Command
+      # 4. Build APK
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
