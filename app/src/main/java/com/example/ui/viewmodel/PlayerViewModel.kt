@@ -1,7 +1,14 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.app.DownloadManager
+import android.content.Context
+import android.media.AudioManager
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -25,7 +32,9 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
         MovieBoxRetrofitClient.getApi(prefs),
         database.movieDao()
     )
+    private val audioManager = application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // --- Purana State ---
     var currentEpisode by mutableStateOf<Episode?>(null)
     var playInfo by mutableStateOf<PlayInfo?>(null)
     var selectedStream by mutableStateOf<StreamItem?>(null)
@@ -35,6 +44,100 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     var isPlaybackLoading by mutableStateOf(false)
     var mediaDurationMs by mutableStateOf(0L)
 
+    // ================= 1. GESTURE STATES (BRIGHTNESS & VOLUME) =================
+    var brightness by mutableFloatStateOf(0.5f)
+    var showBrightnessHud by mutableStateOf(false)
+
+    var volume by mutableFloatStateOf(
+        try {
+            val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat()
+            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).toFloat()
+            cur / max
+        } catch (e: Exception) {
+            0.5f
+        }
+    )
+    var showVolumeHud by mutableStateOf(false)
+
+    // ================= 2. GESTURE FUNCTIONS =================
+    // Left Drag: Brightness kam ya zyada
+    fun adjustBrightness(dragAmount: Float) {
+        brightness = (brightness - (dragAmount * 0.005f)).coerceIn(0.01f, 1.0f)
+        showBrightnessHud = true
+    }
+
+    fun hideBrightnessHud() {
+        showBrightnessHud = false
+    }
+
+    // Right Drag: Volume kam ya zyada
+    fun adjustVolume(dragAmount: Float) {
+        val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        val newRatio = (volume - (dragAmount * 0.005f)).coerceIn(0.0f, 1.0f)
+        volume = newRatio
+        try {
+            audioManager.setStreamVolume(
+                AudioManager.STREAM_MUSIC,
+                (newRatio * maxVol).toInt(),
+                0
+            )
+        } catch (e: Exception) {
+            // Ignore
+        }
+        showVolumeHud = true
+    }
+
+    fun hideVolumeHud() {
+        showVolumeHud = false
+    }
+
+    // ================= 3. QUALITY SELECTION =================
+    fun selectQuality(stream: StreamItem) {
+        selectedStream = stream
+        Toast.makeText(getApplication(), "Quality switch ho rahi hai...", Toast.LENGTH_SHORT).show()
+    }
+
+    // ================= 4. LANGUAGE / SUBTITLE SELECTION =================
+    fun selectSubtitleTrack(subtitle: SubtitleItem?) {
+        selectedSubtitle = subtitle
+        val lang = subtitle?.language ?: "Default"
+        Toast.makeText(getApplication(), "Subtitle/Audio: $lang", Toast.LENGTH_SHORT).show()
+    }
+
+    // ================= 5. NATIVE DOWNLOAD FUNCTION =================
+    fun downloadCurrentMedia(subject: MovieSubject, episode: Episode?) {
+        val streamUrl = selectedStream?.url
+        if (streamUrl.isNullOrEmpty()) {
+            Toast.makeText(getApplication(), "Download link available nahi hai", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val safeName = subject.name.replace("[^a-zA-Z0-9.-]".toRegex(), "_")
+        val fileName = if (subject.isTvShow && episode != null) {
+            "${safeName}_S${episode.seasonNumber}_E${episode.episodeNumber}.mp4"
+        } else {
+            "${safeName}.mp4"
+        }
+
+        try {
+            val request = DownloadManager.Request(Uri.parse(streamUrl)).apply {
+                setTitle(fileName.removeSuffix(".mp4"))
+                setDescription("AnyFilm / NextGen Download")
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(true)
+            }
+
+            val downloadManager = getApplication<Application>().getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            downloadManager.enqueue(request)
+            Toast.makeText(getApplication(), "Download Shuru! Notification bar check karein.", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(getApplication(), "Download Error: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- Purana Playback History Function ---
     fun updatePlaybackProgress(subject: MovieSubject, episode: Episode?, positionMs: Long, durationMs: Long) {
         playbackProgressMs = positionMs
         mediaDurationMs = durationMs
