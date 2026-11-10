@@ -27,7 +27,7 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # 1. Official Screenshot 2 Clean Player Fetch Karein
+      # 1. Official Screenshot 2 Clean Player Restore
       - name: Restore Official DetailScreen
         run: |
           git remote add upstream https://github.com/solo12345689/AnyFilm.git || true
@@ -35,60 +35,73 @@ jobs:
           git checkout upstream/main -- app/src/main/java/com/example/ui/screens/DetailScreen.kt || \
           git checkout upstream/master -- app/src/main/java/com/example/ui/screens/DetailScreen.kt
 
-      # 2. Player ke upar Volume aur Brightness Gestures Inject Karein
-      - name: Add Volume & Brightness Drag Gestures
+      # 2. Universal Brightness & Volume Gestures Injection
+      - name: Inject Gestures to PlayerView
         run: |
           python3 -c '
-          path = "app/src/main/java/com/example/ui/screens/DetailScreen.kt"
-          with open(path, "r") as f:
-              code = f.read()
+          import re, os, glob
 
-          # Zaroori imports package ke theek BAAD add karna
-          pkg_target = "package com.example.ui.screens"
-          imports_to_add = """
-          import androidx.compose.foundation.gestures.detectVerticalDragGestures
-          import androidx.compose.ui.input.pointer.pointerInput
-          import android.media.AudioManager
-          import android.app.Activity
-          import android.content.Context
-          """
-          if pkg_target in code:
-              code = code.replace(pkg_target, pkg_target + "\n" + imports_to_add, 1)
-
-          # PlayerView ke upar Volume aur Brightness ka Gesture Listener lagana
-          # Jab PlayerView call hota hai, uske modifier me gestures enable karna
-          gesture_logic = """
-                      .pointerInput(Unit) {
-                          detectVerticalDragGestures { change, dragAmount ->
-                              val isLeft = change.position.x < (size.width / 2)
+          gesture_code = """
+              var touchStartY = 0f
+              var touchStartX = 0f
+              var isLeft = false
+              setOnTouchListener { view, event ->
+                  when (event.action) {
+                      android.view.MotionEvent.ACTION_DOWN -> {
+                          touchStartY = event.y
+                          touchStartX = event.x
+                          isLeft = touchStartX < (view.width / 2)
+                          false
+                      }
+                      android.view.MotionEvent.ACTION_MOVE -> {
+                          val deltaY = touchStartY - event.y
+                          if (Math.abs(deltaY) > 20) {
                               if (isLeft) {
-                                  val act = context as? Activity
+                                  val act = view.context as? android.app.Activity
                                   act?.let {
                                       val lp = it.window.attributes
-                                      val current = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
-                                      lp.screenBrightness = (current - dragAmount * 0.005f).coerceIn(0.01f, 1.0f)
+                                      val cur = if (lp.screenBrightness < 0) 0.5f else lp.screenBrightness
+                                      lp.screenBrightness = (cur + (deltaY / view.height) * 0.15f).coerceIn(0.01f, 1.0f)
                                       it.window.attributes = lp
                                   }
                               } else {
-                                  val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                                  val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                                  val curVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                                  val step = if (dragAmount < 0) 1 else -1
-                                  am.setStreamVolume(AudioManager.STREAM_MUSIC, (curVol + step).coerceIn(0, maxVol), 0)
+                                  val am = view.context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                                  val max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                                  val cur = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                                  val step = if (deltaY > 0) 1 else -1
+                                  am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, (cur + step).coerceIn(0, max), 0)
                               }
+                              touchStartY = event.y
+                              true
+                          } else {
+                              false
                           }
                       }
+                      else -> false
+                  }
+              }
           """
-          
-          # AndroidView ya PlayerView modifier ke sath jorna
-          if "PlayerView(ctx)" in code:
-              code = code.replace("PlayerView(ctx)", "PlayerView(ctx)" + "\n" + gesture_logic, 1)
-          elif "PlayerView(context)" in code:
-              code = code.replace("PlayerView(context)", "PlayerView(context)" + "\n" + gesture_logic, 1)
 
-          with open(path, "w") as f:
-              f.write(code)
-          print("Gestures successfully attached to Screenshot 2 player!")
+          files_to_check = glob.glob("app/src/main/java/com/example/ui/screens/*.kt")
+          for file_path in files_to_check:
+              with open(file_path, "r") as f:
+                  code = f.read()
+
+              if "PlayerView" in code:
+                  print(f"Found PlayerView in {file_path}")
+                  # Case 1: PlayerView(...).apply {
+                  if re.search(r"PlayerView\s*\([^)]*\)\s*\.apply\s*\{", code):
+                      code = re.sub(r"(PlayerView\s*\([^)]*\)\s*\.apply\s*\{)", r"\1\n" + gesture_code, code)
+                  # Case 2: PlayerView(...) apply {
+                  elif re.search(r"PlayerView\s*\([^)]*\)\s*apply\s*\{", code):
+                      code = re.sub(r"(PlayerView\s*\([^)]*\)\s*apply\s*\{)", r"\1\n" + gesture_code, code)
+                  # Case 3: Just PlayerView(...)
+                  else:
+                      code = re.sub(r"(PlayerView\s*\([^)]*\))", r"\1.apply {\n" + gesture_code + "\n}", code)
+
+                  with open(file_path, "w") as f:
+                      f.write(code)
+                  print(f"Successfully injected gestures into {file_path}!")
           '
 
       # 3. Google Services Missing Fix
