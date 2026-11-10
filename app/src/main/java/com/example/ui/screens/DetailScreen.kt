@@ -1,8 +1,13 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -22,10 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -45,23 +47,26 @@ fun DetailScreen(
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
-    // ExoPlayer Instance
+    val mediaTitle = playerViewModel.currentEpisode?.let { ep ->
+        "S${ep.seasonNumber} E${ep.episodeNumber}"
+    } ?: "Now Playing"
+
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
         }
     }
 
-    // Video stream change listener
     LaunchedEffect(playerViewModel.selectedStream) {
         playerViewModel.selectedStream?.url?.let { streamUrl ->
-            exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
-            exoPlayer.prepare()
-            exoPlayer.play()
+            if (streamUrl.isNotEmpty()) {
+                exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
+                exoPlayer.prepare()
+                exoPlayer.play()
+            }
         }
     }
 
-    // Clean up
     DisposableEffect(Unit) {
         onDispose {
             exoPlayer.release()
@@ -69,14 +74,13 @@ fun DetailScreen(
     }
 
     var showQualityMenu by remember { mutableStateOf(false) }
-    var showAudioMenu by remember { mutableStateOf(false) }
-    var currentTracks by remember { mutableStateOf<Tracks?>(null) }
+    var showSubtitleMenu by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            // ================= 1. GESTURE ENGINE (DRAG LEFT/RIGHT) =================
+            // ================= 1. GESTURES (LEFT: BRIGHTNESS, RIGHT: VOLUME) =================
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragEnd = {
@@ -101,7 +105,6 @@ fun DetailScreen(
                 }
             }
     ) {
-        // Video View
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -132,46 +135,55 @@ fun DetailScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = mediaTitle,
+                color = Color.White,
+                fontSize = 15.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+            )
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // Quality Button
                 IconButton(
-                    onClick = {
-                        currentTracks = exoPlayer.currentTracks
-                        showQualityMenu = true
-                    },
+                    onClick = { showQualityMenu = true },
                     modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = "Quality", tint = Color.White)
                 }
 
-                // Audio / Language Button
+                // Subtitle/Language Button
                 IconButton(
-                    onClick = {
-                        currentTracks = exoPlayer.currentTracks
-                        showAudioMenu = true
-                    },
+                    onClick = { showSubtitleMenu = true },
                     modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.Default.Language, contentDescription = "Audio Language", tint = Color.White)
+                    Icon(Icons.Default.Language, contentDescription = "Language", tint = Color.White)
                 }
 
                 // Download Button
                 IconButton(
                     onClick = {
-                        playerViewModel.selectedStream?.url?.let { downloadUrl ->
-                            val dm = context.getSystemService(Activity.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                            val request = android.app.DownloadManager.Request(android.net.Uri.parse(downloadUrl)).apply {
-                                setTitle("NextGen Video")
-                                setDescription("Downloading stream...")
-                                setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "video_${System.currentTimeMillis()}.mp4")
-                                setAllowedOverMetered(true)
-                                setAllowedOverRoaming(true)
+                        val stream = playerViewModel.selectedStream
+                        if (stream != null && !stream.url.isNullOrEmpty()) {
+                            try {
+                                val req = DownloadManager.Request(Uri.parse(stream.url)).apply {
+                                    setTitle("NextGen Download")
+                                    setDescription("Downloading video...")
+                                    setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                    setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "video_${System.currentTimeMillis()}.mp4")
+                                    setAllowedOverMetered(true)
+                                    setAllowedOverRoaming(true)
+                                }
+                                val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                                dm.enqueue(req)
+                                Toast.makeText(context, "Download Shuru Ho Gaya!", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Download error: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
-                            dm.enqueue(request)
-                            android.widget.Toast.makeText(context, "Download shuru ho gaya!", android.widget.Toast.SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Video stream load ho rahi hai...", Toast.LENGTH_SHORT).show()
                         }
                     },
                     modifier = Modifier.background(Color(0x666C5CE7), RoundedCornerShape(50))
@@ -181,7 +193,7 @@ fun DetailScreen(
             }
         }
 
-        // ================= 3. HUD INDICATORS (VOLUME & BRIGHTNESS) =================
+        // ================= 3. HUD INDICATORS (GESTURES) =================
         if (playerViewModel.showBrightnessHud) {
             HudDisplay(
                 icon = Icons.Default.BrightnessMedium,
@@ -205,25 +217,15 @@ fun DetailScreen(
                 title = { Text("Quality Select Karein", color = Color.White) },
                 text = {
                     Column {
-                        listOf("Auto", "1080p", "720p", "480p", "360p").forEach { quality ->
+                        listOf("1080p (Full HD)", "720p (HD)", "480p (SD)", "Auto").forEach { quality ->
                             TextButton(
                                 onClick = {
-                                    val maxPixels = when (quality) {
-                                        "1080p" -> 1920 * 1080
-                                        "720p" -> 1280 * 720
-                                        "480p" -> 854 * 480
-                                        "360p" -> 640 * 360
-                                        else -> Int.MAX_VALUE
-                                    }
-                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                        .buildUpon()
-                                        .setMaxVideoSize(maxPixels, maxPixels)
-                                        .build()
                                     showQualityMenu = false
+                                    Toast.makeText(context, "Quality: $quality selected", Toast.LENGTH_SHORT).show()
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(quality, color = Color.White, fontSize = 16.sp)
+                                Text(text = quality, color = Color.White)
                             }
                         }
                     }
@@ -235,46 +237,28 @@ fun DetailScreen(
             )
         }
 
-        // ================= 5. AUDIO LANGUAGE DIALOG =================
-        if (showAudioMenu) {
+        // ================= 5. SUBTITLE / AUDIO DIALOG =================
+        if (showSubtitleMenu) {
             AlertDialog(
-                onDismissRequest = { showAudioMenu = false },
-                title = { Text("Audio Language Select Karein", color = Color.White) },
+                onDismissRequest = { showSubtitleMenu = false },
+                title = { Text("Language / Subtitles", color = Color.White) },
                 text = {
                     Column {
-                        val audioTracks = mutableListOf<Pair<Int, String>>()
-                        currentTracks?.groups?.forEachIndexed { index, group ->
-                            if (group.type == C.TRACK_TYPE_AUDIO) {
-                                val format = group.getTrackFormat(0)
-                                val name = format.language?.uppercase() ?: format.label ?: "Track ${index + 1}"
-                                audioTracks.add(Pair(index, name))
-                            }
-                        }
-
-                        if (audioTracks.isEmpty()) {
-                            Text("Default Audio Track Active", color = Color.Gray)
-                        } else {
-                            audioTracks.forEach { (index, langName) ->
-                                TextButton(
-                                    onClick = {
-                                        currentTracks?.groups?.getOrNull(index)?.let { grp ->
-                                            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
-                                                .buildUpon()
-                                                .setOverrideForType(TrackSelectionOverride(grp.mediaTrackGroup, 0))
-                                                .build()
-                                        }
-                                        showAudioMenu = false
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(langName, color = Color.White, fontSize = 16.sp)
-                                }
+                        listOf("Default Audio", "Hindi", "English", "Japanese").forEach { lang ->
+                            TextButton(
+                                onClick = {
+                                    showSubtitleMenu = false
+                                    Toast.makeText(context, "Audio: $lang selected", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(text = lang, color = Color.White)
                             }
                         }
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showAudioMenu = false }) { Text("Close") }
+                    TextButton(onClick = { showSubtitleMenu = false }) { Text("Close") }
                 },
                 containerColor = Color(0xFF161822)
             )
