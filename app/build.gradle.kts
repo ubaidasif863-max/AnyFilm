@@ -15,7 +15,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.anyfilm.app"
+    applicationId = "com.nextgen.app"
     minSdk = 24
     targetSdk = 36
     versionCode = 8
