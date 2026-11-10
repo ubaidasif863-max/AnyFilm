@@ -25,6 +25,58 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
+      # Google Services JSON Missing Error Fix
+      - name: Generate Dummy google-services.json
+        run: |
+          mkdir -p app
+          PKG=$(grep -oP 'applicationId\s*=\s*"\K[^"]+' app/build.gradle* 2>/dev/null || grep -oP 'package="\K[^"]+' app/src/main/AndroidManifest.xml 2>/dev/null || echo "com.solo.anyfilm")
+          echo "Using Package Name: $PKG"
+          cat <<EOF > app/google-services.json
+          {
+            "project_info": {
+              "project_number": "123456789012",
+              "project_id": "anyfilm-app",
+              "storage_bucket": "anyfilm-app.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:abcdef1234567890",
+                  "android_client_info": {
+                    "package_name": "$PKG"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{"current_key": "dummy_api_key"}],
+                "services": {}
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:abcdef1234567891",
+                  "android_client_info": {
+                    "package_name": "com.solo.anyfilm"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{"current_key": "dummy_api_key"}],
+                "services": {}
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:123456789012:android:abcdef1234567892",
+                  "android_client_info": {
+                    "package_name": "com.example"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{"current_key": "dummy_api_key"}],
+                "services": {}
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
