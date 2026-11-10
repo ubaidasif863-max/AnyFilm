@@ -22,13 +22,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import com.example.data.model.MovieSubject
-import com.example.data.model.StreamItem
-import com.example.data.model.SubtitleItem
+import com.example.ui.viewmodel.MovieViewModel
 import com.example.ui.viewmodel.PlayerViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -36,15 +37,15 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 @Composable
 fun DetailScreen(
-    subject: MovieSubject,
-    onBackPress: () -> Unit = {}, // <-- YAHAN DEFAULT VALUE LAGA DI GAYI HAI
-    viewModel: PlayerViewModel = viewModel()
+    movieViewModel: MovieViewModel,
+    onBackPress: () -> Unit = {},
+    playerViewModel: PlayerViewModel = viewModel()
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
     val scope = rememberCoroutineScope()
 
-    // ExoPlayer setup
+    // ExoPlayer Instance
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             playWhenReady = true
@@ -52,8 +53,8 @@ fun DetailScreen(
     }
 
     // Video stream change listener
-    LaunchedEffect(viewModel.selectedStream) {
-        viewModel.selectedStream?.url?.let { streamUrl ->
+    LaunchedEffect(playerViewModel.selectedStream) {
+        playerViewModel.selectedStream?.url?.let { streamUrl ->
             exoPlayer.setMediaItem(MediaItem.fromUri(streamUrl))
             exoPlayer.prepare()
             exoPlayer.play()
@@ -68,7 +69,8 @@ fun DetailScreen(
     }
 
     var showQualityMenu by remember { mutableStateOf(false) }
-    var showSubtitleMenu by remember { mutableStateOf(false) }
+    var showAudioMenu by remember { mutableStateOf(false) }
+    var currentTracks by remember { mutableStateOf<Tracks?>(null) }
 
     Box(
         modifier = Modifier
@@ -80,21 +82,21 @@ fun DetailScreen(
                     onDragEnd = {
                         scope.launch {
                             delay(1200)
-                            viewModel.hideBrightnessHud()
-                            viewModel.hideVolumeHud()
+                            playerViewModel.hideBrightnessHud()
+                            playerViewModel.hideVolumeHud()
                         }
                     }
                 ) { change, dragAmount ->
                     val isLeftSide = change.position.x < (size.width / 2)
                     if (isLeftSide) {
-                        viewModel.adjustBrightness(dragAmount)
+                        playerViewModel.adjustBrightness(dragAmount)
                         activity?.window?.let { window ->
                             val lp = window.attributes
-                            lp.screenBrightness = viewModel.brightness
+                            lp.screenBrightness = playerViewModel.brightness
                             window.attributes = lp
                         }
                     } else {
-                        viewModel.adjustVolume(dragAmount)
+                        playerViewModel.adjustVolume(dragAmount)
                     }
                 }
             }
@@ -130,36 +132,48 @@ fun DetailScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
 
-            Text(
-                text = subject.name,
-                color = Color.White,
-                fontSize = 15.sp,
-                maxLines = 1,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 10.dp)
-            )
+            Spacer(modifier = Modifier.weight(1f))
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // Quality Button
                 IconButton(
-                    onClick = { showQualityMenu = true },
+                    onClick = {
+                        currentTracks = exoPlayer.currentTracks
+                        showQualityMenu = true
+                    },
                     modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = "Quality", tint = Color.White)
                 }
 
-                // Subtitle/Language Button
+                // Audio / Language Button
                 IconButton(
-                    onClick = { showSubtitleMenu = true },
+                    onClick = {
+                        currentTracks = exoPlayer.currentTracks
+                        showAudioMenu = true
+                    },
                     modifier = Modifier.background(Color(0x66000000), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.Default.Language, contentDescription = "Language", tint = Color.White)
+                    Icon(Icons.Default.Language, contentDescription = "Audio Language", tint = Color.White)
                 }
 
                 // Download Button
                 IconButton(
-                    onClick = { viewModel.downloadCurrentMedia(subject, viewModel.currentEpisode) },
+                    onClick = {
+                        playerViewModel.selectedStream?.url?.let { downloadUrl ->
+                            val dm = context.getSystemService(Activity.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                            val request = android.app.DownloadManager.Request(android.net.Uri.parse(downloadUrl)).apply {
+                                setTitle("NextGen Video")
+                                setDescription("Downloading stream...")
+                                setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                                setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, "video_${System.currentTimeMillis()}.mp4")
+                                setAllowedOverMetered(true)
+                                setAllowedOverRoaming(true)
+                            }
+                            dm.enqueue(request)
+                            android.widget.Toast.makeText(context, "Download shuru ho gaya!", android.widget.Toast.SHORT).show()
+                        }
+                    },
                     modifier = Modifier.background(Color(0x666C5CE7), RoundedCornerShape(50))
                 ) {
                     Icon(Icons.Default.Download, contentDescription = "Download", tint = Color.White)
@@ -167,47 +181,49 @@ fun DetailScreen(
             }
         }
 
-        // ================= 3. HUD INDICATORS =================
-        if (viewModel.showBrightnessHud) {
+        // ================= 3. HUD INDICATORS (VOLUME & BRIGHTNESS) =================
+        if (playerViewModel.showBrightnessHud) {
             HudDisplay(
                 icon = Icons.Default.BrightnessMedium,
-                value = (viewModel.brightness * 100).toInt(),
+                value = (playerViewModel.brightness * 100).toInt(),
                 modifier = Modifier.align(Alignment.CenterStart).padding(start = 30.dp)
             )
         }
 
-        if (viewModel.showVolumeHud) {
+        if (playerViewModel.showVolumeHud) {
             HudDisplay(
                 icon = Icons.Default.VolumeUp,
-                value = (viewModel.volume * 100).toInt(),
+                value = (playerViewModel.volume * 100).toInt(),
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 30.dp)
             )
         }
 
         // ================= 4. QUALITY DIALOG =================
         if (showQualityMenu) {
-            val streamList: List<StreamItem> = viewModel.playInfo?.streams ?: emptyList()
             AlertDialog(
                 onDismissRequest = { showQualityMenu = false },
                 title = { Text("Quality Select Karein", color = Color.White) },
                 text = {
                     Column {
-                        if (streamList.isEmpty()) {
-                            Text("Auto / Default Stream", color = Color.Gray)
-                        } else {
-                            for (stream in streamList) {
-                                TextButton(
-                                    onClick = {
-                                        viewModel.selectQuality(stream)
-                                        showQualityMenu = false
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = stream.resolution ?: stream.format ?: "Quality",
-                                        color = if (viewModel.selectedStream == stream) Color(0xFF6C5CE7) else Color.White
-                                    )
-                                }
+                        listOf("Auto", "1080p", "720p", "480p", "360p").forEach { quality ->
+                            TextButton(
+                                onClick = {
+                                    val maxPixels = when (quality) {
+                                        "1080p" -> 1920 * 1080
+                                        "720p" -> 1280 * 720
+                                        "480p" -> 854 * 480
+                                        "360p" -> 640 * 360
+                                        else -> Int.MAX_VALUE
+                                    }
+                                    exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                                        .buildUpon()
+                                        .setMaxVideoSize(maxPixels, maxPixels)
+                                        .build()
+                                    showQualityMenu = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(quality, color = Color.White, fontSize = 16.sp)
                             }
                         }
                     }
@@ -219,36 +235,46 @@ fun DetailScreen(
             )
         }
 
-        // ================= 5. SUBTITLE / AUDIO DIALOG =================
-        if (showSubtitleMenu) {
-            val subtitleList: List<SubtitleItem> = viewModel.playInfo?.subtitles ?: emptyList()
+        // ================= 5. AUDIO LANGUAGE DIALOG =================
+        if (showAudioMenu) {
             AlertDialog(
-                onDismissRequest = { showSubtitleMenu = false },
-                title = { Text("Audio / Subtitle Select Karein", color = Color.White) },
+                onDismissRequest = { showAudioMenu = false },
+                title = { Text("Audio Language Select Karein", color = Color.White) },
                 text = {
                     Column {
-                        if (subtitleList.isEmpty()) {
-                            Text("No extra tracks available", color = Color.Gray)
+                        val audioTracks = mutableListOf<Pair<Int, String>>()
+                        currentTracks?.groups?.forEachIndexed { index, group ->
+                            if (group.type == C.TRACK_TYPE_AUDIO) {
+                                val format = group.getTrackFormat(0)
+                                val name = format.language?.uppercase() ?: format.label ?: "Track ${index + 1}"
+                                audioTracks.add(Pair(index, name))
+                            }
+                        }
+
+                        if (audioTracks.isEmpty()) {
+                            Text("Default Audio Track Active", color = Color.Gray)
                         } else {
-                            for (sub in subtitleList) {
+                            audioTracks.forEach { (index, langName) ->
                                 TextButton(
                                     onClick = {
-                                        viewModel.selectSubtitleTrack(sub)
-                                        showSubtitleMenu = false
+                                        currentTracks?.groups?.getOrNull(index)?.let { grp ->
+                                            exoPlayer.trackSelectionParameters = exoPlayer.trackSelectionParameters
+                                                .buildUpon()
+                                                .setOverrideForType(TrackSelectionOverride(grp.mediaTrackGroup, 0))
+                                                .build()
+                                        }
+                                        showAudioMenu = false
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(
-                                        text = sub.toString(),
-                                        color = if (viewModel.selectedSubtitle == sub) Color(0xFF6C5CE7) else Color.White
-                                    )
+                                    Text(langName, color = Color.White, fontSize = 16.sp)
                                 }
                             }
                         }
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showSubtitleMenu = false }) { Text("Close") }
+                    TextButton(onClick = { showAudioMenu = false }) { Text("Close") }
                 },
                 containerColor = Color(0xFF161822)
             )
