@@ -25,38 +25,18 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x gradlew
 
-      # 1. Fetch Clean Original DetailScreen
-      - name: Fetch Original Clean DetailScreen
+      # 1. Clean DetailScreen Restore
+      - name: Restore Working DetailScreen
         run: |
-          curl -sSL "https://raw.githubusercontent.com/solo12345689/AnyFilm/main/app/src/main/java/com/example/ui/screens/DetailScreen.kt" -o app/src/main/java/com/example/ui/screens/DetailScreen.kt || \
-          curl -sSL "https://raw.githubusercontent.com/solo12345689/AnyFilm/master/app/src/main/java/com/example/ui/screens/DetailScreen.kt" -o app/src/main/java/com/example/ui/screens/DetailScreen.kt
+          git checkout HEAD -- app/src/main/java/com/example/ui/screens/DetailScreen.kt || true
 
-      # 2. Inject Pro Gestures (Brightness, Volume, Download) automatically
-      - name: Inject Gestures and Player Controls
+      # 2. Find Exact Player Location in Project
+      - name: Locate Player File
         run: |
-          python3 -c '
-          import os
-
-          path = "app/src/main/java/com/example/ui/screens/DetailScreen.kt"
-          with open(path, "r") as f:
-              content = f.read()
-
-          # Import checks
-          needed_imports = """
-          import androidx.compose.foundation.gestures.detectVerticalDragGestures
-          import androidx.compose.ui.input.pointer.pointerInput
-          import android.media.AudioManager
-          import android.view.WindowManager
-          import android.app.Activity
-          import android.app.DownloadManager
-          import android.widget.Toast
-          """
-          content = needed_imports + "\n" + content
-
-          with open(path, "w") as f:
-              f.write(content)
-          print("Patched successfully!")
-          '
+          echo "=== SEARCHING FOR PLAYERVIEW IN APP ==="
+          grep -rn "PlayerView" app/src/main/java/ || true
+          echo "=== SEARCHING FOR EXOPLAYER IN APP ==="
+          grep -rn "ExoPlayer" app/src/main/java/ || true
 
       # 3. Google Services Missing Fix
       - name: Generate Dummy google-services.json
